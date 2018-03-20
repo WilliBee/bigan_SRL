@@ -19,7 +19,7 @@ def parse_args():
     # hyperparameters
     parser.add_argument('--epoch', type=int, default=25, help='The number of epochs to run')
     parser.add_argument('--batch_size', type=int, default=64, help='The size of batch')
-    parser.add_argument('--lr', type=float, default=0.0002, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='for adam')
     parser.add_argument('--beta2', type=float, default=0.999, help='for adam')
     parser.add_argument('--slope', type=float, default=1e-2, help='for leaky ReLU')
@@ -69,6 +69,12 @@ def main():
         exit()
 
     bigan = BIGAN(args)
+
+    # ecrase anciens fichiers
+    with open('pixel_error_BIGAN.txt', 'w') as f:
+        f.writelines('')
+    with open('z_error_BIGAN.txt', 'w') as f:
+        f.writelines('')
 
     # launch the graph in a session
     bigan.train()
