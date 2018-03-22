@@ -19,7 +19,7 @@ import math
 from functools import reduce
 
 from plot_utils import save_plot_losses, save_plot_pixel_norm, save_plot_z_norm
-from models import Generator_FC, Discriminator_FC, Encoder_FC, Generator_CNN, Discriminator_CNN, Encoder_CNN
+from models import Generator_FC, Discriminator_FC, Encoder_FC, Generator_CNN, Discriminator_CNN, Encoder_CNN, Encoder_FC_VAE
 
 from representation_plot import plot_representation
 
@@ -172,7 +172,8 @@ class BIGAN(object):
             # networks init
             self.G = Generator_FC(self.z_dim, self.h_dim, self.X_dim)
             self.D = Discriminator_FC(self.z_dim, self.h_dim, self.X_dim)
-            self.E = Encoder_FC(self.z_dim, self.h_dim, self.X_dim)
+            # self.E = Encoder_FC(self.z_dim, self.h_dim, self.X_dim)
+            self.E = Encoder_FC_VAE(self.z_dim, self.h_dim, self.X_dim)
         elif args.network_type == 'CNN':
             params = {'slope': self.slope, 'dropout':self.dropout, 'batch_size':self.batch_size, 'num_channels':self.num_channels, 'dataset':self.dataset}
 
@@ -192,12 +193,21 @@ class BIGAN(object):
 
 
 
+
         print('---------- Networks architecture -------------')
         utils.print_network(self.G)
         utils.print_network(self.E)
         utils.print_network(self.D)
         print('-----------------------------------------------')
 
+    def sample_z(self, mu, log_var):
+        # Using reparameterization trick to sample from a gaussian
+        eps = Variable(torch.randn(self.batch_size, self.z_dim))
+
+        if self.gpu_mode:
+            eps = eps.cuda()
+
+        return mu + torch.exp(log_var / 2) * eps
 
 
     def D_(self, X, z):
@@ -220,6 +230,8 @@ class BIGAN(object):
         self.train_hist['D_loss'] = []
         self.train_hist['G_loss'] = []
 
+        self.train_hist['kl_loss'] = []
+
         self.eval_hist = {}
         self.eval_hist['D_loss'] = []
         self.eval_hist['G_loss'] = []
@@ -236,6 +248,7 @@ class BIGAN(object):
 
             train_loss_G = 0
             train_loss_D = 0
+            kl_loss = 0
 
             if self.dataset == "robot_world":
                 dataset.shuffle()
@@ -266,14 +279,24 @@ class BIGAN(object):
 
                     elif self.network_type == 'FC':
                         X = X.view(self.batch_size, -1)
-                        z_hat = self.E(X)
+
+                        z_mu_hat, z_var_hat = self.E(X)
+                        z_hat = self.sample_z(z_mu_hat, z_var_hat)
+
                         X_hat = self.G(z)
 
                         D_enc = self.D_(X, z_hat)
                         D_gen = self.D_(X_hat, z)
 
+
+                    # kl_loss_z = 0.5 * torch.sum(torch.exp(1) + 0**2 - 1. - z_hat)
+
+                    kl_loss = 0.5 * torch.sum(torch.exp(z_var_hat) + z_mu_hat**2 - 1. - z_var_hat)
+
                     D_loss = -torch.mean(log(D_enc) + log(1 - D_gen))
-                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc))
+                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc)) + kl_loss
+
+
 
                     D_loss.backward(retain_graph=True)
                     self.D_solver.step()
@@ -283,8 +306,10 @@ class BIGAN(object):
                     self.G_solver.step()
                     self.reset_grad()
 
+
                     train_loss_G += G_loss.data[0]
                     train_loss_D += D_loss.data[0]
+                    kl_loss += kl_loss.data[0]
 
                     if batch_id % 1000 == 0:
                         # Print and plot every now and then
@@ -334,6 +359,7 @@ class BIGAN(object):
 
             self.train_hist['D_loss'].append(train_loss_D / len(dataset.train_loader))
             self.train_hist['G_loss'].append(train_loss_G / len(dataset.train_loader))
+            self.train_hist['kl_loss'].append(kl_loss / len(dataset.train_loader))
 
 
             self.D.eval()
@@ -370,16 +396,23 @@ class BIGAN(object):
                         D_enc = self.D(X, z_hat)
                         D_gen = self.D(X_hat, z)
 
+                        kl_loss = 0
+
                     elif self.network_type == 'FC':
                         X = X.view(self.batch_size, -1)
-                        z_hat = self.E(X)
+                        # z_hat = self.E(X)
+                        z_mu_hat, z_var_hat = self.E(X)
+                        z_hat = self.sample_z(z_mu_hat, z_var_hat)
+
                         X_hat = self.G(z)
 
                         D_enc = self.D_(X, z_hat)
                         D_gen = self.D_(X_hat, z)
 
+                        kl_loss = 0.5 * torch.sum(torch.exp(z_var_hat) + z_mu_hat**2 - 1. - z_var_hat)
+
                     D_loss = -torch.mean(log(D_enc) + log(1 - D_gen))
-                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc))
+                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc)) + kl_loss
 
                     test_loss_G += G_loss.data[0]
                     test_loss_D += D_loss.data[0]
@@ -388,8 +421,10 @@ class BIGAN(object):
                     pixel_norm = pixel_norm.norm().data[0] / float(self.X_dim)
                     mean_pixel_norm += pixel_norm
 
+                    z_mu, z_var = self.E(X_hat)
+                    z_bar = self.sample_z(z_mu, z_var)
 
-                    z_norm = z - self.E(X_hat)
+                    z_norm = z - z_bar
                     z_norm = z_norm.norm().data[0] / float(self.z_dim)
                     mean_z_norm += z_norm
 
@@ -413,6 +448,7 @@ class BIGAN(object):
 
             with open('z_error_BIGAN.txt', 'a') as f:
                 f.writelines(str(mean_z_norm / norm_counter) + '\n')
+
 
             ##### save X and G(E(X))
             samples = X.data.cpu().numpy()
@@ -446,7 +482,10 @@ class BIGAN(object):
                             sample = np.rot90(sample, 2)
                             plt.imshow(sample)
 
-            X_hat = self.G(self.E(X).view(self.batch_size, self.z_dim))
+            z_mu_bar, z_var_bar = self.E(X)
+            z_bar = self.sample_z(z_mu_bar, z_var_bar)
+
+            X_hat = self.G(z_bar.view(self.batch_size, self.z_dim))
             samples = X_hat.data.cpu().numpy()
 
 
@@ -491,6 +530,23 @@ class BIGAN(object):
         torch.save(self.G.state_dict(), self.save_dir + "/G.pt")
         torch.save(self.E.state_dict(), self.save_dir + "/E.pt")
         torch.save(self.D.state_dict(), self.save_dir + "/D.pt")
+
+    def load_model(self, args):
+        if args.network_type == 'FC':
+            # networks init
+            self.G = Generator_FC(self.z_dim, self.h_dim, self.X_dim)
+            self.D = Discriminator_FC(self.z_dim, self.h_dim, self.X_dim)
+            self.E = Encoder_FC(self.z_dim, self.h_dim, self.X_dim)
+        elif args.network_type == 'CNN':
+            params = {'slope': self.slope, 'dropout':self.dropout, 'batch_size':self.batch_size, 'num_channels':self.num_channels, 'dataset':self.dataset}
+
+            self.G = Generator_CNN(self.z_dim, self.h_dim, self.X_dim, params)
+            self.D = Discriminator_CNN(self.z_dim, self.h_dim, self.X_dim, params)
+            self.E = Encoder_CNN(self.z_dim, self.h_dim, self.X_dim, params)
+
+        self.G.load_state_dict(torch.load("saved_model/G.pt"))
+        self.E.load_state_dict(torch.load("saved_model/E.pt"))
+        self.D.load_state_dict(torch.load("saved_model/D.pt"))
 
     def plot_states(self):
         if self.dataset == 'robot_world':
@@ -538,7 +594,10 @@ class BIGAN(object):
                 if self.network_type == 'CNN':
                     X = X.view(self.batch_size, 3, 16, 16)
 
-                z_hat = self.E(X)
+                # z_hat = self.E(X)
+                z_mu_hat, z_var_hat = self.E(X)
+                z_hat = self.sample_z(z_mu_hat, z_var_hat)
+
                 z_hat = z_hat.view(self.batch_size, self.z_dim)
 
 
