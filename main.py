@@ -86,5 +86,7 @@ def main():
 
     bigan.save_model()
 
+    bigan.plot_states()
+
 if __name__ == '__main__':
     main()
