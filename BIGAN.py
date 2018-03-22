@@ -18,9 +18,12 @@ import numpy as np
 import math
 from functools import reduce
 
-from plot_utils import save_plot_losses, save_plot_pixel_norm
+from plot_utils import save_plot_losses, save_plot_pixel_norm, save_plot_z_norm
 from models import Generator_FC, Discriminator_FC, Encoder_FC, Generator_CNN, Discriminator_CNN, Encoder_CNN
 
+from representation_plot import plot_representation
+
+import matplotlib.mlab as mlab
 
 def log(x):
       return torch.log(x + 1e-8)
@@ -240,11 +243,11 @@ class BIGAN(object):
             for batch_id, (data, target) in enumerate(dataset.train_loader):
 
                 if self.gpu_mode:
-                    z = Variable(torch.rand(self.batch_size, self.z_dim)).cuda()
+                    z = Variable(torch.randn(self.batch_size, self.z_dim)).cuda()
                     X = data
                     X = Variable(X).cuda()
                 else:
-                    z = Variable(torch.rand(self.batch_size, self.z_dim))
+                    z = Variable(torch.randn(self.batch_size, self.z_dim))
                     X = data
                     X = Variable(X)
 
@@ -324,6 +327,7 @@ class BIGAN(object):
 
                         filename = "epoch_" + str(epoch) + "_batchid_" + str(batch_id)
                         plt.savefig(self.result_dir + '/train/{}.png'.format(filename, bbox_inches='tight'))
+                        plt.close()
 
             print("Train loss G:", train_loss_G / len(dataset.train_loader))
             print("Train loss D:", train_loss_D / len(dataset.train_loader))
@@ -442,7 +446,6 @@ class BIGAN(object):
                             sample = np.rot90(sample, 2)
                             plt.imshow(sample)
 
-
             X_hat = self.G(self.E(X).view(self.batch_size, self.z_dim))
             samples = X_hat.data.cpu().numpy()
 
@@ -478,12 +481,131 @@ class BIGAN(object):
 
             filename = "epoch_" + str(epoch)
             plt.savefig(self.result_dir + '/recons/{}.png'.format(filename), bbox_inches='tight')
-            plt.close(fig)
+            plt.close()
 
-        save_plot_losses(self.train_hist['D_loss'], self.train_hist['G_loss'], self.eval_hist['D_loss'], self.eval_hist['G_loss'])
-        save_plot_pixel_norm(self.eval_hist['pixel_norm'])
+        save_plot_losses(self.train_hist['D_loss'], self.train_hist['G_loss'], self.eval_hist['D_loss'], self.eval_hist['G_loss'], self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
+        save_plot_pixel_norm(self.eval_hist['pixel_norm'], self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
+        save_plot_z_norm(self.eval_hist['z_norm'], self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
 
     def save_model(self):
         torch.save(self.G.state_dict(), self.save_dir + "/G.pt")
         torch.save(self.E.state_dict(), self.save_dir + "/E.pt")
         torch.save(self.D.state_dict(), self.save_dir + "/D.pt")
+
+    def plot_states(self):
+        if self.dataset == 'robot_world':
+            test_data = np.load(self.dataset_path + '/simple_navigation_task_test.npz')
+
+            test_observations, actions = test_data['observations'], test_data['actions']
+            rewards, episode_starts = test_data['rewards'], test_data['episode_starts']
+            test_obs_dim = reduce(lambda x,y: x*y, test_observations.shape[1:])
+
+            if len(test_observations.shape) > 2:
+                # Channel first
+                test_observations = np.transpose(test_observations, (0, 3, 1, 2))
+                # Flatten the image
+                test_observations = test_observations.reshape((-1, test_obs_dim))
+
+
+            test_observations = test_observations.astype(np.float32)
+
+            obs_var = Variable(torch.from_numpy(test_observations), volatile=True)
+            if self.gpu_mode:
+                obs_var = obs_var.cuda()
+
+            num_samples = test_observations.shape[0] - 1
+
+            print("NUM SAMPLES IS " + str(num_samples))
+
+            # indices for all time steps where the episode continues
+            indices = np.array([i for i in range(num_samples)], dtype='int64')
+
+            # split indices into minibatches
+            minibatchlist = [np.array(sorted(indices[start_idx:start_idx + self.batch_size]))
+                for start_idx in range(0, num_samples - self.batch_size + 1, self.batch_size)]
+
+            enumerated_minibatches = list(enumerate(minibatchlist))
+
+            for it, batch in enumerated_minibatches:
+                obs = Variable(torch.from_numpy(test_observations[batch]).float())
+
+                # Sample data
+                if self.gpu_mode:
+                    X = obs.cuda()
+                else:
+                    X = batch
+
+                if self.network_type == 'CNN':
+                    X = X.view(self.batch_size, 3, 16, 16)
+
+                z_hat = self.E(X)
+                z_hat = z_hat.view(self.batch_size, self.z_dim)
+
+
+                if it==0:
+                    states = z_hat.data.cpu().numpy()
+                else:
+                    states = np.vstack((states , z_hat.data.cpu().numpy() ))
+
+
+            rewards = test_data['rewards']
+            rewards = rewards[:len(states)]
+
+            print("LEN OF REWARDS IS : ", len(rewards))
+            print('LEN OF STATES IS : ', len(states))
+
+            if self.z_dim == 2:
+                plot_representation_2D(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
+            else:
+                plot_representation(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
+
+            plot_z_distribution(z_hat.data.cpu().numpy(), self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
+
+
+
+
+def plot_representation_2D(states, rewards, model_used, z_dim, epochs, lr, batch_size, name="Learned State Representation", add_colorbar=True):
+    plt.ion()
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111, axisbg = 'grey')
+
+    ax.scatter(states[:, 0], states[:, 1], s=7, c=np.clip(rewards, -1, 1), cmap='bwr', linewidths=0.1, label=name)
+    plt.xlabel('State dimension 1')
+    plt.ylabel('State dimension 2')
+
+    ax.set_aspect('equal',  adjustable='box')
+
+    params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(epochs) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
+    plt.title(params, fontsize=8)
+
+    # plt.gca().set_aspect('equal', adjustable='box')
+    plt.savefig("representation_plot.eps", format='eps', dpi=1000)
+    plt.close()
+
+def plot_z_distribution(z, model_used, z_dim, epochs, lr, batch_size):
+    if not os.path.exists('histograms'):
+        os.makedirs('histograms')
+
+
+    # print(z.shape[1])
+    for i in range(z.shape[1]):
+        fig = plt.figure()
+        # the histogram of the data
+        n, bins, patches = plt.hist(z[:,i], 50, normed=1, facecolor='orange', alpha=0.75)
+
+        # add a 'best fit' line
+        # y = mlab.normpdf( bins, mu, sigma)
+        # l = plt.plot(bins, y, 'r--', linewidth=1)
+
+        plt.xlabel('z_' + str(i))
+        plt.ylabel('Probability')
+        plt.suptitle(r'Histogram of z distribution in dim ' + str(i))
+        params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(epochs) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
+        plt.title(params, fontsize=8)
+        # plt.axis([40, 160, 0, 0.03])
+        plt.grid(True)
+
+        # plt.gca().set_aspect('equal', adjustable='box')
+        plt.savefig("histograms/histogram_z_" + str(i) + ".eps", format='eps', dpi=1000)
+        plt.close()
