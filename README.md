@@ -1,5 +1,5 @@
 # bigan_SRL
-Testing BIGAN (Adversarial Feature Learning) for State Representation Learning, a loss term is added to take into account the actions
+Testing VAE for State Representation Learning
 
 ### Learn a state representation
 
@@ -10,7 +10,7 @@ python3 main.py [-h] [--dataset {mnist,robot_world}]
                [--save_dir SAVE_DIR] [--result_dir RESULT_DIR]
                [--log_dir LOG_DIR] [--epoch EPOCH] [--batch_size BATCH_SIZE]
                [--lr LR] [--beta1 BETA1] [--beta2 BETA2] [--slope SLOPE]
-               [--decay DECAY] [--dropout DROPOUT] [--network_type {FC,CNN}]
+               [--decay DECAY] [--dropout DROPOUT] [--network_type {FC}]
                [--z_dim Z_DIM] [--h_dim H_DIM]
 
 
