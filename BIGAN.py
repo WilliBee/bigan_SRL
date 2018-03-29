@@ -19,9 +19,9 @@ import math
 from functools import reduce
 
 from plot_utils import save_plot_losses, save_plot_pixel_norm, save_plot_z_norm
-from models import Generator_FC, Discriminator_FC, Encoder_FC, Generator_CNN, Discriminator_CNN, Encoder_CNN, Encoder_FC_VAE
+from models import Generator_FC, Discriminator_FC, Encoder_FC, Generator_CNN, Discriminator_CNN, Encoder_CNN
 
-from representation_plot import plot_representation
+from representation_plot import plot_representation, plot_representation2
 
 import matplotlib.mlab as mlab
 
@@ -51,7 +51,9 @@ class RobotWorld:
 
         print('Loading data ... ')
 
+
         ###########################################################
+        # Import training dataset
         path = dataset_path + '/simple_navigation_task_train.npz'
         training_data = np.load(path)
 
@@ -66,6 +68,7 @@ class RobotWorld:
             observations = observations.reshape((-1, obs_dim))
 
         ###########################################################
+        # Import evaluation dataset
         path = dataset_path + '/simple_navigation_task_test.npz'
         test_data = np.load(path)
 
@@ -79,7 +82,7 @@ class RobotWorld:
             # Flatten the image
             test_observations = test_observations.reshape((-1, test_obs_dim))
 
-        ###########################################################
+        ##########################################################
         self.observations = observations.astype(np.float32)
 
         obs_var = Variable(torch.from_numpy(observations), volatile=True)
@@ -122,6 +125,7 @@ class RobotWorld:
             for it, batch in list(enumerate(self.test_minibatchlist)) ]
 
     def shuffle(self):
+        # shuffle the minibatches
         enumerated_minibatches = list(enumerate(self.minibatchlist))
         np.random.shuffle(enumerated_minibatches)
 
@@ -139,8 +143,6 @@ class BIGAN(object):
     """
 
     def __init__(self, args):
-    # def __init__(self, epoch, batch_size, save_dir, result_dir, log_dir, gpu_mode, learning_rate):
-        # parameters
         self.epoch = args.epoch
         self.batch_size = args.batch_size
         self.save_dir = args.save_dir
@@ -172,8 +174,7 @@ class BIGAN(object):
             # networks init
             self.G = Generator_FC(self.z_dim, self.h_dim, self.X_dim)
             self.D = Discriminator_FC(self.z_dim, self.h_dim, self.X_dim)
-            # self.E = Encoder_FC(self.z_dim, self.h_dim, self.X_dim)
-            self.E = Encoder_FC_VAE(self.z_dim, self.h_dim, self.X_dim)
+            self.E = Encoder_FC(self.z_dim, self.h_dim, self.X_dim)
         elif args.network_type == 'CNN':
             params = {'slope': self.slope, 'dropout':self.dropout, 'batch_size':self.batch_size, 'num_channels':self.num_channels, 'dataset':self.dataset}
 
@@ -193,25 +194,16 @@ class BIGAN(object):
 
 
 
-
         print('---------- Networks architecture -------------')
         utils.print_network(self.G)
         utils.print_network(self.E)
         utils.print_network(self.D)
         print('-----------------------------------------------')
 
-    def sample_z(self, mu, log_var):
-        # Using reparameterization trick to sample from a gaussian
-        eps = Variable(torch.randn(self.batch_size, self.z_dim))
-
-        if self.gpu_mode:
-            eps = eps.cuda()
-
-        return mu + torch.exp(log_var / 2) * eps
 
 
     def D_(self, X, z):
-        return self.D(torch.cat([X, z], 1))
+        return self.D(X, z)
 
     def reset_grad(self):
         self.E.zero_grad()
@@ -230,8 +222,6 @@ class BIGAN(object):
         self.train_hist['D_loss'] = []
         self.train_hist['G_loss'] = []
 
-        self.train_hist['kl_loss'] = []
-
         self.eval_hist = {}
         self.eval_hist['D_loss'] = []
         self.eval_hist['G_loss'] = []
@@ -248,7 +238,6 @@ class BIGAN(object):
 
             train_loss_G = 0
             train_loss_D = 0
-            kl_loss = 0
 
             if self.dataset == "robot_world":
                 dataset.shuffle()
@@ -256,14 +245,17 @@ class BIGAN(object):
             for batch_id, (data, target) in enumerate(dataset.train_loader):
 
                 if self.gpu_mode:
-                    z = Variable(torch.randn(self.batch_size, self.z_dim)).cuda()
+                    # sample z
+                    z = Variable(torch.rand(self.batch_size, self.z_dim)).cuda()
+                    # X is a real image from the dataset
                     X = data
                     X = Variable(X).cuda()
                 else:
-                    z = Variable(torch.randn(self.batch_size, self.z_dim))
+                    z = Variable(torch.rand(self.batch_size, self.z_dim))
                     X = data
                     X = Variable(X)
 
+                # sometimes bathsize of X is not equal to actual batch_size
                 if X.size(0) == self.batch_size:
 
                     if self.network_type == 'CNN':
@@ -279,24 +271,15 @@ class BIGAN(object):
 
                     elif self.network_type == 'FC':
                         X = X.view(self.batch_size, -1)
-
-                        z_mu_hat, z_var_hat = self.E(X)
-                        z_hat = self.sample_z(z_mu_hat, z_var_hat)
-
+                        z_hat = self.E(X)
                         X_hat = self.G(z)
 
                         D_enc = self.D_(X, z_hat)
                         D_gen = self.D_(X_hat, z)
 
 
-                    # kl_loss_z = 0.5 * torch.sum(torch.exp(1) + 0**2 - 1. - z_hat)
-
-                    kl_loss = 0.5 * torch.sum(torch.exp(z_var_hat) + z_mu_hat**2 - 1. - z_var_hat)
-
                     D_loss = -torch.mean(log(D_enc) + log(1 - D_gen))
-                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc)) + kl_loss
-
-
+                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc))
 
                     D_loss.backward(retain_graph=True)
                     self.D_solver.step()
@@ -306,10 +289,8 @@ class BIGAN(object):
                     self.G_solver.step()
                     self.reset_grad()
 
-
                     train_loss_G += G_loss.data[0]
                     train_loss_D += D_loss.data[0]
-                    kl_loss += kl_loss.data[0]
 
                     if batch_id % 1000 == 0:
                         # Print and plot every now and then
@@ -330,7 +311,6 @@ class BIGAN(object):
                                 if self.network_type == 'FC':
                                     if self.dataset == 'mnist':
                                         sample = sample.reshape(28, 28)
-                                        # sample = sample*MNIST_STD + MNIST_MEAN
                                         plt.imshow(sample, cmap='Greys_r')
                                     elif self.dataset == 'robot_world':
                                         sample = sample.reshape(16,16,3)
@@ -338,7 +318,6 @@ class BIGAN(object):
                                         plt.imshow(sample)
                                 elif self.network_type == 'CNN':
                                     if self.dataset == 'mnist':
-                                        # sample = sample*MNIST_STD + MNIST_MEAN
                                         plt.imshow(sample[0,:,:], cmap='Greys_r')
                                     elif self.dataset == 'robot_world':
                                         sample = np.clip(sample, 0, 1)
@@ -359,7 +338,6 @@ class BIGAN(object):
 
             self.train_hist['D_loss'].append(train_loss_D / len(dataset.train_loader))
             self.train_hist['G_loss'].append(train_loss_G / len(dataset.train_loader))
-            self.train_hist['kl_loss'].append(kl_loss / len(dataset.train_loader))
 
 
             self.D.eval()
@@ -374,7 +352,7 @@ class BIGAN(object):
 
             for batch_id, (data, target) in enumerate(dataset.test_loader):
                 # Sample data
-                z = Variable(torch.randn(self.batch_size, self.z_dim))
+                z = Variable(torch.rand(self.batch_size, self.z_dim))
                 X_data = Variable(data)
 
                 if self.gpu_mode:
@@ -390,29 +368,21 @@ class BIGAN(object):
                         z_hat = z_hat.view(self.batch_size, -1)
                         X_hat = self.G(z)
 
-                        # 2D tensor of size [batch_size,z_dim] to 4D of size [batch_size,z_dim,1,1]
                         z = z.unsqueeze(2).unsqueeze(3)
 
                         D_enc = self.D(X, z_hat)
                         D_gen = self.D(X_hat, z)
 
-                        kl_loss = 0
-
                     elif self.network_type == 'FC':
                         X = X.view(self.batch_size, -1)
-                        # z_hat = self.E(X)
-                        z_mu_hat, z_var_hat = self.E(X)
-                        z_hat = self.sample_z(z_mu_hat, z_var_hat)
-
+                        z_hat = self.E(X)
                         X_hat = self.G(z)
 
                         D_enc = self.D_(X, z_hat)
                         D_gen = self.D_(X_hat, z)
 
-                        kl_loss = 0.5 * torch.sum(torch.exp(z_var_hat) + z_mu_hat**2 - 1. - z_var_hat)
-
                     D_loss = -torch.mean(log(D_enc) + log(1 - D_gen))
-                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc)) + kl_loss
+                    G_loss = -torch.mean(log(D_gen) + log(1 - D_enc))
 
                     test_loss_G += G_loss.data[0]
                     test_loss_D += D_loss.data[0]
@@ -421,10 +391,8 @@ class BIGAN(object):
                     pixel_norm = pixel_norm.norm().data[0] / float(self.X_dim)
                     mean_pixel_norm += pixel_norm
 
-                    z_mu, z_var = self.E(X_hat)
-                    z_bar = self.sample_z(z_mu, z_var)
 
-                    z_norm = z - z_bar
+                    z_norm = z - self.E(X_hat)
                     z_norm = z_norm.norm().data[0] / float(self.z_dim)
                     mean_z_norm += z_norm
 
@@ -449,8 +417,7 @@ class BIGAN(object):
             with open('z_error_BIGAN.txt', 'a') as f:
                 f.writelines(str(mean_z_norm / norm_counter) + '\n')
 
-
-            ##### save X and G(E(X))
+            ##### At the end of the epoch, save X and its reconstruction G(E(X))
             samples = X.data.cpu().numpy()
 
             fig = plt.figure(figsize=(10, 2))
@@ -467,7 +434,6 @@ class BIGAN(object):
                     if self.network_type == 'FC':
                         if self.dataset == 'mnist':
                             sample = sample.reshape(28, 28)
-                            # sample = sample*MNIST_STD + MNIST_MEAN
                             plt.imshow(sample, cmap='Greys_r')
                         elif self.dataset == 'robot_world':
                             sample = sample.reshape(16,16,3)
@@ -475,17 +441,13 @@ class BIGAN(object):
                             plt.imshow(sample)
                     elif self.network_type == 'CNN':
                         if self.dataset == 'mnist':
-                            # sample = sample*MNIST_STD + MNIST_MEAN
                             plt.imshow(sample[0,:,:], cmap='Greys_r')
                         elif self.dataset == 'robot_world':
                             sample = sample.reshape(16,16,3)
                             sample = np.rot90(sample, 2)
                             plt.imshow(sample)
 
-            z_mu_bar, z_var_bar = self.E(X)
-            z_bar = self.sample_z(z_mu_bar, z_var_bar)
-
-            X_hat = self.G(z_bar.view(self.batch_size, self.z_dim))
+            X_hat = self.G(self.E(X).view(self.batch_size, self.z_dim))
             samples = X_hat.data.cpu().numpy()
 
 
@@ -499,7 +461,6 @@ class BIGAN(object):
                     if self.network_type == 'FC':
                         if self.dataset == 'mnist':
                             sample = sample.reshape(28, 28)
-                            # sample = sample*MNIST_STD + MNIST_MEAN
                             plt.imshow(sample, cmap='Greys_r')
                         elif self.dataset == 'robot_world':
                             sample = sample.reshape(16,16,3)
@@ -507,7 +468,6 @@ class BIGAN(object):
                             plt.imshow(sample)
                     elif self.network_type == 'CNN':
                         if self.dataset == 'mnist':
-                            # sample = sample*MNIST_STD + MNIST_MEAN
                             plt.imshow(sample[0,:,:], cmap='Greys_r')
                         elif self.dataset == 'robot_world':
                             sample = sample.reshape(16,16,3)
@@ -521,6 +481,9 @@ class BIGAN(object):
             filename = "epoch_" + str(epoch)
             plt.savefig(self.result_dir + '/recons/{}.png'.format(filename), bbox_inches='tight')
             plt.close()
+
+            if epoch % 10 == 0:
+                self.plot_states(epoch)
 
         save_plot_losses(self.train_hist['D_loss'], self.train_hist['G_loss'], self.eval_hist['D_loss'], self.eval_hist['G_loss'], self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
         save_plot_pixel_norm(self.eval_hist['pixel_norm'], self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
@@ -544,11 +507,17 @@ class BIGAN(object):
             self.D = Discriminator_CNN(self.z_dim, self.h_dim, self.X_dim, params)
             self.E = Encoder_CNN(self.z_dim, self.h_dim, self.X_dim, params)
 
-        self.G.load_state_dict(torch.load("saved_model/G.pt"))
-        self.E.load_state_dict(torch.load("saved_model/E.pt"))
-        self.D.load_state_dict(torch.load("saved_model/D.pt"))
+        self.G.load_state_dict(torch.load("models/G.pt"))
+        self.E.load_state_dict(torch.load("models/E.pt"))
+        self.D.load_state_dict(torch.load("models/D.pt"))
 
-    def plot_states(self):
+        if self.gpu_mode:
+            self.G.cuda()
+            self.D.cuda()
+            self.E.cuda()
+
+    def plot_states(self, i):
+        # plot the representation of the latent space by running through all the evaluation dataset_transform
         if self.dataset == 'robot_world':
             test_data = np.load(self.dataset_path + '/simple_navigation_task_test.npz')
 
@@ -594,10 +563,7 @@ class BIGAN(object):
                 if self.network_type == 'CNN':
                     X = X.view(self.batch_size, 3, 16, 16)
 
-                # z_hat = self.E(X)
-                z_mu_hat, z_var_hat = self.E(X)
-                z_hat = self.sample_z(z_mu_hat, z_var_hat)
-
+                z_hat = self.E(X)
                 z_hat = z_hat.view(self.batch_size, self.z_dim)
 
 
@@ -614,57 +580,30 @@ class BIGAN(object):
             print('LEN OF STATES IS : ', len(states))
 
             if self.z_dim == 2:
-                plot_representation_2D(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
+                plot_representation2(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size, i)
             else:
-                plot_representation(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
-
-            plot_z_distribution(z_hat.data.cpu().numpy(), self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size)
-
+                plot_representation(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size, i)
+                plot_representation2(states, rewards, self.network_type, self.z_dim, self.epoch, self.learning_rate, self.batch_size, i)
 
 
-
-def plot_representation_2D(states, rewards, model_used, z_dim, epochs, lr, batch_size, name="Learned State Representation", add_colorbar=True):
-    plt.ion()
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111, axisbg = 'grey')
-
-    ax.scatter(states[:, 0], states[:, 1], s=7, c=np.clip(rewards, -1, 1), cmap='bwr', linewidths=0.1, label=name)
-    plt.xlabel('State dimension 1')
-    plt.ylabel('State dimension 2')
-
-    ax.set_aspect('equal',  adjustable='box')
-
-    params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(epochs) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
-    plt.title(params, fontsize=8)
-
-    # plt.gca().set_aspect('equal', adjustable='box')
-    plt.savefig("representation_plot.eps", format='eps', dpi=1000)
-    plt.close()
 
 def plot_z_distribution(z, model_used, z_dim, epochs, lr, batch_size):
+    # plotting the distribution of the components of the latent vector dimension by dimension
     if not os.path.exists('histograms'):
         os.makedirs('histograms')
 
-
-    # print(z.shape[1])
     for i in range(z.shape[1]):
         fig = plt.figure()
         # the histogram of the data
         n, bins, patches = plt.hist(z[:,i], 50, normed=1, facecolor='orange', alpha=0.75)
 
-        # add a 'best fit' line
-        # y = mlab.normpdf( bins, mu, sigma)
-        # l = plt.plot(bins, y, 'r--', linewidth=1)
 
         plt.xlabel('z_' + str(i))
         plt.ylabel('Probability')
         plt.suptitle(r'Histogram of z distribution in dim ' + str(i))
         params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(epochs) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
         plt.title(params, fontsize=8)
-        # plt.axis([40, 160, 0, 0.03])
         plt.grid(True)
 
-        # plt.gca().set_aspect('equal', adjustable='box')
         plt.savefig("histograms/histogram_z_" + str(i) + ".eps", format='eps', dpi=1000)
         plt.close()

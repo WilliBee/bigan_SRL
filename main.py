@@ -1,3 +1,14 @@
+"""
+Testing BIGAN (Adversarial Feature Learning) for State Representation Learning
+
+This is a PyTorch implementation of a BIGAN Network described in the paper "Adversarial Feature Learning" by J. Donahue, P. Krahenbuhl, T. Darrell.
+
+This program will be tested on datasets from "Learning State Representations with Robotic Priors" (Jonschkowski & Brock, 2015), https://github.com/tu-rbo/learning-state-representations-with-robotic-priors
+
+
+"""
+
+
 import argparse, os
 from BIGAN import BIGAN
 
@@ -76,15 +87,11 @@ def main():
     with open('z_error_BIGAN.txt', 'w') as f:
         f.writelines('')
 
-    # launch the graph in a session
     bigan.train()
     print(" [*] Training finished!")
 
-    # # visualize learned generator
-    # gan.visualize_results(args.epoch)
-    # print(" [*] Testing finished!")
-
     bigan.save_model()
+
 
     bigan.plot_states()
 
