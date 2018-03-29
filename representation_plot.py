@@ -21,7 +21,7 @@ except NameError:
 
 # Init seaborn
 sns.set()
-INTERACTIVE_PLOT = True
+INTERACTIVE_PLOT = False
 TITLE_MAX_LENGTH = 50
 
 
@@ -68,7 +68,7 @@ def pauseOrClose(fig):
 #     plot_representation(s_transformed, rewards, name, add_colorbar, path, cmap=cmap, fit_pca=False)
 
 
-def plot_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, name="Learned State Representation",
+def plot_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, i, name="Learned State Representation",
                         add_colorbar=True, path=None, fit_pca=True, cmap='coolwarm'):
     """
     Plot learned state representation using rewards for coloring
@@ -95,21 +95,53 @@ def plot_representation(states, rewards, model_used, z_dim, epochs, lr, batch_si
     elif state_dim == 2:
         plot_2d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size)
     else:
-        plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size)
+        plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, i)
 
-    plt.savefig("representation_plot.eps", format='eps', dpi=1000)
+    plt.savefig("representation_plot_3D_" +str(i) + ".eps", format='eps', dpi=1000)
 
-def plot_2d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, name="Learned State Representation",
+def plot_representation2(states, rewards, model_used, z_dim, epochs, lr, batch_size, i, name="Learned State Representation",
+                        add_colorbar=True, path=None, fit_pca=True, cmap='coolwarm'):
+    """
+    Plot learned state representation using rewards for coloring
+    :param states: (numpy array)
+    :param rewards: (numpy 1D array)
+    :param name: (str)
+    :param add_colorbar: (bool)
+    :param path: (str)
+    :param fit_pca: (bool)
+    :param cmap: (str)
+    """
+    state_dim = states.shape[1]
+    if state_dim != 1 and (fit_pca or state_dim > 3):
+        name += " (PCA)"
+        n_components = min(state_dim, 2)
+        print("Fitting PCA with {} components".format(n_components))
+        states = PCA(n_components=n_components).fit_transform(states)
+
+    if state_dim == 1:
+        # Extend states as 2D:
+        states_matrix = np.zeros((states.shape[0], 2))
+        states_matrix[:, 0] = states[:, 0]
+        plot_2d_representation(states_matrix, rewards, model_used, z_dim, epochs, lr, batch_size, i)
+    elif state_dim == 2:
+        plot_2d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, i)
+    else:
+        plot_2d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, i)
+
+    plt.savefig("representation_plot_2D_" +str(i) + ".eps", format='eps', dpi=1000)
+    plt.close()
+
+def plot_2d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, i, name="Learned State Representation",
                            add_colorbar=True, path=None, cmap='coolwarm'):
-    updateDisplayMode()
+    # updateDisplayMode()
     fig = plt.figure(name)
     plt.clf()
     plt.scatter(states[:, 0], states[:, 1], s=7, c=rewards, cmap=cmap, linewidths=0.1)
     plt.xlabel('State dimension 1')
     plt.ylabel('State dimension 2')
 
-    plt.suptitle(fill(name, TITLE_MAX_LENGTH))
-    params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(epochs) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
+    # plt.suptitle(fill(name, TITLE_MAX_LENGTH))
+    params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(i) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
     plt.title(params, fontsize=6)
 
     fig.tight_layout()
@@ -117,10 +149,10 @@ def plot_2d_representation(states, rewards, model_used, z_dim, epochs, lr, batch
         plt.colorbar(label='Reward')
     if path is not None:
         plt.savefig(path)
-    pauseOrClose(fig)
+    # pauseOrClose(fig)
 
 
-def plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, name="Learned State Representation",
+def plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch_size, i, name="Learned State Representation",
                            add_colorbar=True, path=None, cmap='coolwarm'):
     updateDisplayMode()
     fig = plt.figure(name)
@@ -134,7 +166,7 @@ def plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch
 
     # ax.set_title(fill(name, TITLE_MAX_LENGTH))
     plt.suptitle(fill(name, TITLE_MAX_LENGTH))
-    params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(epochs) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
+    params = "Network type: " + model_used + ", Dimension of latent space: " + str(z_dim) + ", epochs: " + str(i) + ", learning rate: " + str(lr) + ", batch size:" + str(batch_size)
     plt.title(params, fontsize=6)
 
     fig.tight_layout()
@@ -142,7 +174,7 @@ def plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch
         fig.colorbar(im, label='Reward')
     if path is not None:
         plt.savefig(path)
-    pauseOrClose(fig)
+    # pauseOrClose(fig)
 
 
 def plot_observations(observations, name='Observation Samples'):
