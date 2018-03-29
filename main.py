@@ -1,13 +1,10 @@
 """
-Testing BIGAN (Adversarial Feature Learning) for State Representation Learning
+Testing BIGAN (Adversarial Feature Learning) for State Representation Learning with an additional term to take into account actions (see report section 3. for more details)
 
 This is a PyTorch implementation of a BIGAN Network described in the paper "Adversarial Feature Learning" by J. Donahue, P. Krahenbuhl, T. Darrell.
 
 This program will be tested on datasets from "Learning State Representations with Robotic Priors" (Jonschkowski & Brock, 2015), https://github.com/tu-rbo/learning-state-representations-with-robotic-priors
-
-
 """
-
 
 import argparse, os
 from BIGAN import BIGAN
@@ -87,13 +84,17 @@ def main():
     with open('z_error_BIGAN.txt', 'w') as f:
         f.writelines('')
 
-    bigan.train()
-    print(" [*] Training finished!")
+    if args.network_type == "FC":
+        # # launch the graph in a session
+        bigan.train()
+        print(" [*] Training finished!")
 
-    bigan.save_model()
+
+        bigan.save_model()
 
 
-    bigan.plot_states()
+    else:
+        print("Only FC networks are available here")
 
 if __name__ == '__main__':
     main()
