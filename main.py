@@ -1,17 +1,9 @@
-"""
-Testing BIGAN (Adversarial Feature Learning) for State Representation Learning with an additional term to take into account actions (see report section 3. for more details)
-
-This is a PyTorch implementation of a BIGAN Network described in the paper "Adversarial Feature Learning" by J. Donahue, P. Krahenbuhl, T. Darrell.
-
-This program will be tested on datasets from "Learning State Representations with Robotic Priors" (Jonschkowski & Brock, 2015), https://github.com/tu-rbo/learning-state-representations-with-robotic-priors
-"""
-
 import argparse, os
-from BIGAN import BIGAN
+from VAE import VAE
 
 """parsing and configuration"""
 def parse_args():
-    desc = "Pytorch implementation of BIGAN"
+    desc = "Pytorch implementation of VAE"
     parser = argparse.ArgumentParser(description=desc)
 
 
@@ -35,7 +27,7 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.2)
 
     # network parameters
-    parser.add_argument('--network_type', type=str, default='FC', choices=['FC', 'CNN'], help='Type of network (Fully connectec or CNN)')
+    parser.add_argument('--network_type', type=str, default='FC', choices=['FC'], help='Type of network (Fully connectec or CNN)')
     parser.add_argument('--z_dim', type=int, default=50, help='The dimension of latent space Z')
     parser.add_argument('--h_dim', type=int, default=1024, help='The dimension of the hidden layers in case of a FC network')
 
@@ -76,7 +68,7 @@ def main():
     if args is None:
         exit()
 
-    bigan = BIGAN(args)
+    vae = VAE(args)
 
     # ecrase anciens fichiers
     with open('pixel_error_BIGAN.txt', 'w') as f:
@@ -84,17 +76,15 @@ def main():
     with open('z_error_BIGAN.txt', 'w') as f:
         f.writelines('')
 
-    if args.network_type == "FC":
-        # # launch the graph in a session
-        bigan.train()
-        print(" [*] Training finished!")
+    # launch the graph in a session
+    vae.train()
+    print(" [*] Training finished!")
 
 
-        bigan.save_model()
+    vae.save_model()
 
 
-    else:
-        print("Only FC networks are available here")
+    VAE.plot_states()
 
 if __name__ == '__main__':
     main()
