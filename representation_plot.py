@@ -174,7 +174,7 @@ def plot_3d_representation(states, rewards, model_used, z_dim, epochs, lr, batch
         fig.colorbar(im, label='Reward')
     if path is not None:
         plt.savefig(path)
-    pauseOrClose(fig)
+    # pauseOrClose(fig)
 
 
 def plot_observations(observations, name='Observation Samples'):
